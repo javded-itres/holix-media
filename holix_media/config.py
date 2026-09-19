@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 
@@ -46,8 +46,26 @@ class MediaProvider:
     @property
     def api_key(self) -> str:
         if self.api_key_env:
-            return _env(self.api_key_env)
-        return str(self.extra.get("api_key") or "")
+            val = _env(self.api_key_env)
+            if val:
+                return val
+        extra_key = str(self.extra.get("api_key") or "").strip()
+        if extra_key:
+            return extra_key
+        if self.type.strip().lower() in {"litellm", "litellm_images", "litellm_videos"}:
+            return _env("LITELLM_API_KEY")
+        return ""
+
+    @property
+    def resolved_base_url(self) -> str:
+        base = (self.base_url or "").strip()
+        if not base and self.type.strip().lower() in {
+            "litellm",
+            "litellm_images",
+            "litellm_videos",
+        }:
+            base = _env("LITELLM_API_BASE") or _profile_litellm_base()
+        return _norm_v1(base)
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,6 +87,29 @@ class MediaConfig:
                     return item
             return None
         return pool[0]
+
+
+def _norm_v1(base: str) -> str:
+    url = (base or "").strip().rstrip("/")
+    if not url:
+        return ""
+    if url.endswith("/v1"):
+        return url
+    return url + "/v1"
+
+
+def _profile_litellm_base() -> str:
+    try:
+        from core.env_loader import active_profile_name
+        from core.profile import ProfileManager
+
+        cfg = ProfileManager().load_profile(str(active_profile_name() or "default"))
+        pdata = (getattr(cfg, "providers", None) or {}).get("litellm")
+        if isinstance(pdata, dict):
+            return str(pdata.get("base_url") or "").strip()
+    except Exception:
+        return ""
+    return ""
 
 
 def _as_list(raw: Any) -> list[dict[str, Any]]:
@@ -143,6 +184,8 @@ def load_media_config(settings: dict[str, Any] | None = None) -> MediaConfig:
         images = [env_img, *[p for p in images if p and p.id != env_img.id]]
     if env_vid:
         videos = [env_vid, *[p for p in videos if p and p.id != env_vid.id]]
+    images = [_with_resolved_proxy(p) for p in images if p]
+    videos = [_with_resolved_proxy(p) for p in videos if p]
     return MediaConfig(
         enabled=_env_bool("HOLIX_MEDIA_ENABLED", bool(raw.get("enabled", True))),
         auto_send=_env_bool("HOLIX_MEDIA_AUTO_SEND", bool(raw.get("auto_send", True))),
@@ -150,6 +193,17 @@ def load_media_config(settings: dict[str, Any] | None = None) -> MediaConfig:
         image_providers=tuple(p for p in images if p is not None),
         video_providers=tuple(p for p in videos if p is not None),
     )
+
+
+def _with_resolved_proxy(p: MediaProvider) -> MediaProvider:
+    if p.type.strip().lower() not in {"litellm", "litellm_images", "litellm_videos"}:
+        return p
+    base = p.resolved_base_url
+    key_env = p.api_key_env or "LITELLM_API_KEY"
+    model = p.model
+    if not model:
+        model = "sora-2" if p.kind == "video" else "dall-e-3"
+    return replace(p, base_url=base, api_key_env=key_env, model=model)
 
 
 # used by http_json provider

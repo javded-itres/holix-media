@@ -32,6 +32,24 @@ class FakeHttp:
 
 
 @pytest.mark.asyncio
+async def test_litellm_images_uses_openai_path(monkeypatch) -> None:
+    monkeypatch.setenv("LITELLM_API_KEY", "sk-proxy")
+    http = FakeHttp([{"data": [{"url": "https://cdn.example/a.png"}]}], gets={"https://cdn.example/a.png": b"IMG"})
+    spec = MediaProvider(
+        id="litellm",
+        kind="image",
+        type="litellm",
+        base_url="http://127.0.0.1:4000/v1",
+        api_key_env="LITELLM_API_KEY",
+        model="openai/dall-e-3",
+    )
+    blob = await generate_image(spec, "cat", http=http)
+    assert blob.data == b"IMG"
+    assert blob.source_url == "https://cdn.example/a.png"
+    assert "/images/generations" in http.post_calls[0]
+
+
+@pytest.mark.asyncio
 async def test_openai_images_b64(monkeypatch) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     png = base64.b64encode(b"PNGDATA").decode()

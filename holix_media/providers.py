@@ -18,6 +18,7 @@ class MediaBlob:
     data: bytes
     mime: str
     filename: str
+    source_url: str | None = None
 
 
 class MediaProviderError(RuntimeError):
@@ -60,7 +61,7 @@ async def generate_image(
 ) -> MediaBlob:
     transport = http or HttpxTransport()
     kind = provider.type.strip().lower()
-    if kind in {"openai_images", "openai", "dalle"}:
+    if kind in {"openai_images", "openai", "dalle", "litellm", "litellm_images"}:
         return await _openai_images(provider, prompt, transport, size=size)
     if kind in {"http_json", "http"}:
         return await _http_json(provider, prompt, transport, kind="image")
@@ -76,7 +77,7 @@ async def generate_video(
 ) -> MediaBlob:
     transport = http or HttpxTransport()
     kind = provider.type.strip().lower()
-    if kind in {"openai_videos", "openai", "sora"}:
+    if kind in {"openai_videos", "openai", "sora", "litellm", "litellm_videos"}:
         return await _openai_videos(provider, prompt, transport, duration_s=duration_s)
     if kind in {"http_json", "http"}:
         return await _http_json(provider, prompt, transport, kind="video")
@@ -92,15 +93,19 @@ async def _openai_images(
 ) -> MediaBlob:
     if not provider.api_key:
         raise MediaProviderError(f"API key missing ({provider.api_key_env or 'api_key'})")
-    url = _join(provider.base_url, "/images/generations")
+    base = provider.resolved_base_url or provider.base_url
+    if not base:
+        raise MediaProviderError("base_url is empty (set LITELLM_API_BASE or image provider base_url)")
+    url = _join(base, "/images/generations")
     body: dict[str, Any] = {
         "model": provider.model or "dall-e-3",
         "prompt": prompt,
         "n": 1,
         "size": size or provider.size or "1024x1024",
     }
-    # Older DALL·E accepts b64; gpt-image / Grok may ignore or reject it.
-    if (provider.model or "").lower().startswith("dall-e"):
+    # DALL·E accepts b64; LiteLLM / gpt-image / Grok often reject response_format.
+    ptype = provider.type.strip().lower()
+    if ptype not in {"litellm", "litellm_images"} and "dall-e" in (provider.model or "").lower():
         body["response_format"] = "b64_json"
     data = await http.post_json(url, headers=_auth_headers(provider), json=body, timeout=180.0)
     items = data.get("data")
@@ -110,13 +115,13 @@ async def _openai_images(
     b64 = item.get("b64_json") or item.get("b64")
     if b64:
         raw = base64.b64decode(str(b64))
-        return MediaBlob(raw, "image/png", _filename("png"))
+        return MediaBlob(raw, "image/png", _filename("png"), source_url=None)
     remote = item.get("url")
     if not remote:
         raise MediaProviderError("Image response has neither b64_json nor url")
     raw, mime = await http.get_bytes(str(remote), timeout=180.0)
     ext = "jpg" if "jpeg" in mime else "png" if "png" in mime else "webp"
-    return MediaBlob(raw, mime or "image/png", _filename(ext))
+    return MediaBlob(raw, mime or "image/png", _filename(ext), source_url=str(remote))
 
 
 async def _openai_videos(
@@ -128,7 +133,10 @@ async def _openai_videos(
 ) -> MediaBlob:
     if not provider.api_key:
         raise MediaProviderError(f"API key missing ({provider.api_key_env or 'api_key'})")
-    url = _join(provider.base_url, str(provider.extra.get("path") or "/videos"))
+    base = provider.resolved_base_url or provider.base_url
+    if not base:
+        raise MediaProviderError("base_url is empty (set LITELLM_API_BASE or video provider base_url)")
+    url = _join(base, str(provider.extra.get("path") or "/videos"))
     body: dict[str, Any] = {
         "model": provider.model or "sora-2",
         "prompt": prompt,
@@ -143,7 +151,7 @@ async def _openai_videos(
     if not job_id:
         raise MediaProviderError(f"Video job id missing: {json.dumps(data)[:400]}")
     poll = str(provider.extra.get("poll_path") or "/videos/{id}")
-    status_url = _join(provider.base_url, poll.replace("{id}", job_id))
+    status_url = _join(base, poll.replace("{id}", job_id))
     for _ in range(60):
         await asyncio.sleep(3.0)
         status = await http.get_json(status_url, headers=_auth_headers(provider), timeout=60.0)
@@ -174,7 +182,7 @@ async def _http_json(
         "kind": kind,
     }
     path = str(provider.extra.get("path") or "/")
-    url = _join(provider.base_url, path)
+    url = _join(provider.resolved_base_url or provider.base_url, path)
     body = _fill_template(provider.extra.get("json_body") or {"prompt": "{{prompt}}"}, mapping)
     if not isinstance(body, dict):
         raise MediaProviderError("http_json json_body must be an object")
@@ -187,13 +195,18 @@ async def _http_json(
             raw = base64.b64decode(str(b64))
             ext = "mp4" if kind == "video" else "png"
             mime = "video/mp4" if kind == "video" else "image/png"
-            return MediaBlob(raw, mime, _filename(ext))
+            return MediaBlob(raw, mime, _filename(ext), source_url=None)
     if url_path:
         remote = json_path(data, url_path)
         if remote:
             raw, mime = await http.get_bytes(str(remote), timeout=180.0)
             ext = "mp4" if kind == "video" else "png"
-            return MediaBlob(raw, mime or ("video/mp4" if kind == "video" else "image/png"), _filename(ext))
+            return MediaBlob(
+                raw,
+                mime or ("video/mp4" if kind == "video" else "image/png"),
+                _filename(ext),
+                source_url=str(remote),
+            )
     blob = await _blob_from_payload(data, http, headers=_auth_headers(provider), kind=kind)
     if blob is None:
         raise MediaProviderError(f"Could not parse media from JSON: {json.dumps(data)[:400]}")
@@ -212,7 +225,7 @@ async def _blob_from_payload(
         raw = base64.b64decode(str(b64))
         ext = "mp4" if kind == "video" else "png"
         mime = "video/mp4" if kind == "video" else "image/png"
-        return MediaBlob(raw, mime, _filename(ext))
+        return MediaBlob(raw, mime, _filename(ext), source_url=None)
     remote = (
         json_path(data, "url")
         or json_path(data, "data.0.url")
@@ -223,7 +236,12 @@ async def _blob_from_payload(
     if remote:
         raw, mime = await http.get_bytes(str(remote), headers=headers, timeout=180.0)
         ext = "mp4" if kind == "video" else "png"
-        return MediaBlob(raw, mime or ("video/mp4" if kind == "video" else "image/png"), _filename(ext))
+        return MediaBlob(
+            raw,
+            mime or ("video/mp4" if kind == "video" else "image/png"),
+            _filename(ext),
+            source_url=str(remote),
+        )
     return None
 
 

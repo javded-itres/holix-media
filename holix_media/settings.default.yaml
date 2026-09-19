@@ -4,6 +4,13 @@ output_subdir: media
 install_skill: true
 # Connect models here (or via HOLIX_MEDIA_* env). First entry is the default.
 image_providers:
+  - id: litellm
+    type: litellm
+    # empty base_url → LITELLM_API_BASE or Holix profile providers.litellm
+    base_url: ""
+    api_key_env: LITELLM_API_KEY
+    model: dall-e-3
+    size: 1024x1024
   - id: openai
     type: openai_images
     base_url: https://api.openai.com/v1
@@ -16,6 +23,12 @@ image_providers:
   #   api_key_env: XAI_API_KEY
   #   model: grok-2-image
 video_providers:
+  - id: litellm
+    type: litellm_videos
+    base_url: ""
+    api_key_env: LITELLM_API_KEY
+    model: sora-2
+    path: /videos
   - id: openai
     type: openai_videos
     base_url: https://api.openai.com/v1

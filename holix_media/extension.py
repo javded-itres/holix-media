@@ -12,7 +12,7 @@ from holix_media.store import save_blob
 
 class MediaHostExtension:
     name = "media"
-    version = "0.1.0"
+    version = "0.1.1"
     requires_holix = ">=1.1.0"
     description = "Generate images and video; send to Telegram/MAX chats"
     capabilities = frozenset({"cli"})

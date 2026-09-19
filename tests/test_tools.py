@@ -41,6 +41,8 @@ async def test_generate_image_saves_file(tmp_path: Path, monkeypatch: pytest.Mon
     monkeypatch.setattr("holix_media.tools.generate_image", fake_gen)
     result = await tool.execute(prompt="a tree")
     assert "Saved image:" in result
+    assert "file://" in result
+    assert "[Open image]" in result
     files = list((tmp_path / "media").glob("*.png"))
     assert len(files) == 1
     assert files[0].read_bytes() == b"PNG"

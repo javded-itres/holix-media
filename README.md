@@ -10,7 +10,8 @@ MIT-расширение [Holix](https://github.com/javded-itres/Holix): аге�
 |-------------|-----|
 | Картинка | tool `generate_image` / слэш `/imagine` |
 | Видео | tool `generate_video` / слэш `/video` |
-| Провайдеры | OpenAI Images, OpenAI Videos, xAI (тот же `openai_images`), любой HTTP JSON |
+| Провайдеры | LiteLLM proxy, OpenAI Images/Videos, xAI (`openai_images`), любой HTTP JSON |
+| TUI | кликабельная ссылка `file://…` на сохранённый файл |
 | Мессенджеры | файл пишется в `workspace/media/`, затем `send_chat_files` (альбом Telegram / вложение MAX) |
 | CLI | `holix media providers`, `holix media imagine "…"`, `holix media video "…"` |
 
@@ -49,8 +50,12 @@ holix extensions agent-list
 `~/.holix/profiles/<профиль>/.env` или `~/.holix/global/.env`:
 
 ```bash
+# LiteLLM / MikroLLM / любой OpenAI-compatible proxy
+LITELLM_API_KEY=sk-...
+LITELLM_API_BASE=http://127.0.0.1:4000
+
+# или прямой OpenAI / xAI
 OPENAI_API_KEY=sk-...
-# и/или
 XAI_API_KEY=xai-...
 ```
 
@@ -68,6 +73,13 @@ auto_send: true
 output_subdir: media
 
 image_providers:
+  - id: litellm
+    type: litellm
+    # пустой base_url → LITELLM_API_BASE или Holix profile providers.litellm
+    base_url: ""
+    api_key_env: LITELLM_API_KEY
+    model: dall-e-3   # или openai/dall-e-3 — как в config LiteLLM
+    size: 1024x1024
   - id: openai
     type: openai_images
     base_url: https://api.openai.com/v1
@@ -97,7 +109,7 @@ video_providers:
 |-----|--------|
 | `HOLIX_MEDIA_ENABLED` | вкл/выкл |
 | `HOLIX_MEDIA_AUTO_SEND` | сразу слать файл в чат Telegram/MAX |
-| `HOLIX_MEDIA_IMAGE_TYPE` | `openai_images` / `http_json` |
+| `HOLIX_MEDIA_IMAGE_TYPE` | `litellm` / `openai_images` / `http_json` |
 | `HOLIX_MEDIA_IMAGE_BASE_URL` | например `https://api.x.ai/v1` |
 | `HOLIX_MEDIA_IMAGE_MODEL` | `dall-e-3`, `grok-2-image`, … |
 | `HOLIX_MEDIA_IMAGE_API_KEY_ENV` | имя переменной с ключом |
@@ -113,7 +125,9 @@ holix tui
 holix -p production gateway restart
 ```
 
-В чате: «нарисуй красного кота» или `/imagine красный кот`. Агент вызывает `generate_image`, сохраняет PNG в `workspace/media/` и при `auto_send: true` шлёт вложение в Telegram/MAX.
+В **TUI**: «нарисуй красного кота» — в логе появится кликабельная ссылка `file://…` (клик открывает файл в системном просмотрщике).
+
+В **Telegram/MAX**: при `auto_send: true` уходит вложение. Если нет — агент вызывает `send_chat_files`.
 
 Если отправка не сработала, агент должен вызвать core-tool `send_chat_files` с путём к файлу.
 
@@ -141,6 +155,11 @@ holix -p production extensions agent-list
 Не копируйте ключи в git. Прод — через ваш обычный деплой расширений, не hotfix файлов Holix core.
 
 ## Типы провайдеров
+
+### `litellm` / `litellm_videos`
+
+Тот же OpenAI-путь через прокси (`POST {base}/images/generations` или `/videos`).  
+`base_url` можно не задавать — берётся `LITELLM_API_BASE` (и провайдер `litellm` из профиля Holix). Модель — как в LiteLLM (`dall-e-3` или `openai/dall-e-3`).
 
 ### `openai_images`
 

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from pathlib import Path
+
 from holix_media.config import MediaConfig, load_media_config
 from holix_media.providers import generate_image, generate_video
 from holix_media.store import save_blob
@@ -102,12 +104,7 @@ class GenerateImageTool(BaseTool):
         path = save_blob(blob, agent=self._agent, subdir=cfg.output_subdir)
         auto = cfg.auto_send if send is None else bool(send)
         extra = await _maybe_send(str(path), text[:200], auto_send=auto)
-        return (
-            f"Saved image: {path}\n"
-            f"provider={spec.id} type={spec.type} model={spec.model} "
-            f"bytes={len(blob.data)}"
-            f"{extra}"
-        )
+        return _format_saved("image", path, spec, blob, extra)
 
 
 class GenerateVideoTool(BaseTool):
@@ -170,12 +167,29 @@ class GenerateVideoTool(BaseTool):
         path = save_blob(blob, agent=self._agent, subdir=cfg.output_subdir)
         auto = cfg.auto_send if send is None else bool(send)
         extra = await _maybe_send(str(path), text[:200], auto_send=auto)
-        return (
-            f"Saved video: {path}\n"
-            f"provider={spec.id} type={spec.type} model={spec.model} "
-            f"bytes={len(blob.data)}"
-            f"{extra}"
-        )
+        return _format_saved("video", path, spec, blob, extra)
+
+
+def _format_saved(kind: str, path: Path, spec: Any, blob: Any, extra: str) -> str:
+    uri = Path(path).resolve().as_uri()
+    label = "Open image" if kind == "image" else "Open video"
+    lines = [
+        f"Saved {kind}: {path}",
+        f"[{label}]({uri})",
+        f"Open: {uri}",
+        f"provider={spec.id} type={spec.type} model={spec.model} bytes={len(blob.data)}",
+    ]
+    remote = getattr(blob, "source_url", None)
+    if remote:
+        lines.append(f"URL: {remote}")
+    if extra:
+        lines.append(extra.strip())
+    lines.append(
+        f"In TUI the {kind} link is clickable. In Telegram/MAX the file is sent "
+        "when auto_send is on; otherwise call send_chat_files with this path. "
+        f"Include [{label}]({uri}) in the user-visible reply."
+    )
+    return "\n".join(lines)
 
 
 def all_tools(*, config: MediaConfig | None = None, agent: Any | None = None) -> list[Any]:

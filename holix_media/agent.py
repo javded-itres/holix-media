@@ -48,7 +48,7 @@ _SKILL_SRC = Path(__file__).resolve().parent / "skill" / "media-gen"
 
 class MediaAgentExtension(AgentExtensionBase):
     name = "media"
-    version = "0.1.0"
+    version = "0.1.1"
     requires_holix = ">=1.1.0"
     permissions = frozenset({"tools", "network", "filesystem"})
 
@@ -63,15 +63,31 @@ class MediaAgentExtension(AgentExtensionBase):
             "install_skill": True,
             "image_providers": [
                 {
+                    "id": "litellm",
+                    "type": "litellm",
+                    "base_url": "",
+                    "api_key_env": "LITELLM_API_KEY",
+                    "model": "dall-e-3",
+                    "size": "1024x1024",
+                },
+                {
                     "id": "openai",
                     "type": "openai_images",
                     "base_url": "https://api.openai.com/v1",
                     "api_key_env": "OPENAI_API_KEY",
                     "model": "dall-e-3",
                     "size": "1024x1024",
-                }
+                },
             ],
             "video_providers": [
+                {
+                    "id": "litellm",
+                    "type": "litellm_videos",
+                    "base_url": "",
+                    "api_key_env": "LITELLM_API_KEY",
+                    "model": "sora-2",
+                    "path": "/videos",
+                },
                 {
                     "id": "openai",
                     "type": "openai_videos",
@@ -79,7 +95,7 @@ class MediaAgentExtension(AgentExtensionBase):
                     "api_key_env": "OPENAI_API_KEY",
                     "model": "sora-2",
                     "path": "/videos",
-                }
+                },
             ],
         }
 
@@ -114,10 +130,11 @@ class MediaAgentExtension(AgentExtensionBase):
             "## Media generation\n"
             "Tools `generate_image` and `generate_video` create files in workspace `media/`.\n"
             f"Image providers: {imgs}. Video providers: {vids}.\n"
-            "In Telegram or MAX, after generating, the file is sent to the chat when auto_send "
-            "is on. If it is not sent, call `send_chat_files` with the returned path. "
-            "Do not paste base64 or claim the user can see the file unless send_chat_files "
-            "returned Sent N file(s)."
+            "In TUI, put the markdown Open link from the tool result in the reply "
+            "(`[Open image](file://…)`). In Telegram or MAX the file is sent when "
+            "auto_send is on; otherwise call `send_chat_files`. "
+            "Do not paste base64. Do not claim the user received the file unless "
+            "send_chat_files returned Sent N file(s)."
         )
 
     def _install_skill(self, agent: Any) -> None:
