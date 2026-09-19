@@ -7,7 +7,7 @@ import base64
 import json
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import urljoin
+from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
 from holix_media.config import MediaProvider, json_path
 from holix_media.http import HttpTransport, HttpxTransport
@@ -159,27 +159,45 @@ async def _openai_videos(
     refs = list(references or [])
     if refs:
         _attach_video_refs(body, prompt, refs)
-    data = await http.post_json(url, headers=_auth_headers(provider), json=body, timeout=180.0)
-    blob = await _blob_from_payload(data, http, headers=_auth_headers(provider), kind="video")
+    headers = _auth_headers(provider)
+    data = await http.post_json(url, headers=headers, json=body, timeout=180.0)
+    blob = await _blob_from_payload(data, http, headers=headers, kind="video")
     if blob is not None:
         return blob
-    job_id = str(data.get("id") or "")
+    job_id = str(data.get("id") or data.get("generation_id") or "").strip()
     if not job_id:
         raise MediaProviderError(f"Video job id missing: {json.dumps(data)[:400]}")
-    poll = str(provider.extra.get("poll_path") or "/videos/{id}")
-    status_url = _join(base, poll.replace("{id}", job_id))
-    for _ in range(60):
-        await asyncio.sleep(3.0)
-        status = await http.get_json(status_url, headers=_auth_headers(provider), timeout=60.0)
-        state = str(status.get("status") or "").lower()
-        blob = await _blob_from_payload(
-            status, http, headers=_auth_headers(provider), kind="video"
-        )
+    _raise_if_video_failed(data)
+    status_url = _video_poll_url(
+        base,
+        job_id=job_id,
+        model=provider.model,
+        polling_url=str(data.get("polling_url") or ""),
+        poll_path=str(provider.extra.get("poll_path") or "/videos/{id}"),
+    )
+    last: dict[str, Any] = data
+    # OpenRouter / Seedance jobs often take 4–10 minutes.
+    for _ in range(120):
+        await asyncio.sleep(5.0)
+        status = await http.get_json(status_url, headers=headers, timeout=60.0)
+        last = status if isinstance(status, dict) else {"raw": status}
+        _raise_if_video_failed(last)
+        blob = await _blob_from_payload(last, http, headers=headers, kind="video")
         if blob is not None:
             return blob
-        if state in {"failed", "error", "cancelled"}:
-            raise MediaProviderError(f"Video job {state}: {json.dumps(status)[:400]}")
-    raise MediaProviderError("Video generation timed out")
+        state = str(last.get("status") or "").lower()
+        if state in {"completed", "succeeded", "success"}:
+            content_url = _join(base, f"/videos/{job_id}/content")
+            try:
+                raw, mime = await http.get_bytes(content_url, headers=headers, timeout=180.0)
+            except Exception:
+                raw, mime = b"", ""
+            if raw and "json" not in (mime or "") and len(raw) > 64:
+                return MediaBlob(raw, mime or "video/mp4", _filename("mp4"), source_url=content_url)
+            raise MediaProviderError(
+                f"Video job completed but no file URL: {json.dumps(last)[:400]}"
+            )
+    raise MediaProviderError(f"Video generation timed out: {json.dumps(last)[:400]}")
 
 
 async def _http_json(
@@ -250,8 +268,11 @@ async def _blob_from_payload(
         json_path(data, "url")
         or json_path(data, "data.0.url")
         or json_path(data, "output.url")
+        or json_path(data, "output.video_url")
         or json_path(data, "video_url")
         or json_path(data, "image_url")
+        or json_path(data, "assets.video")
+        or json_path(data, "result.url")
     )
     if remote:
         raw, mime = await http.get_bytes(str(remote), headers=headers, timeout=180.0)
@@ -263,6 +284,41 @@ async def _blob_from_payload(
             source_url=str(remote),
         )
     return None
+
+
+def _raise_if_video_failed(status: dict[str, Any]) -> None:
+    state = str(status.get("status") or "").lower()
+    if state not in {"failed", "error", "cancelled"}:
+        return
+    err = status.get("error") or json.dumps(status, ensure_ascii=False)[:400]
+    raise MediaProviderError(f"Video job failed: {err}")
+
+
+def _video_poll_url(
+    base: str,
+    *,
+    job_id: str,
+    model: str,
+    polling_url: str,
+    poll_path: str,
+) -> str:
+    """Prefer gateway /videos/{id}?model=… even if OpenRouter returned polling_url."""
+    path = (poll_path or "/videos/{id}").replace("{id}", job_id)
+    raw = (polling_url or "").strip()
+    if raw:
+        parsed = urlparse(raw)
+        if parsed.path:
+            path = parsed.path
+            if path.startswith("/api/v1/"):
+                path = path[len("/api") :]
+    url = _join(base, path)
+    query = dict(parse_qsl(urlparse(url).query))
+    if model and "model" not in query:
+        query["model"] = model
+    if not query:
+        return url
+    parts = urlparse(url)
+    return urlunparse(parts._replace(query=urlencode(query)))
 
 
 def _attach_image_refs(

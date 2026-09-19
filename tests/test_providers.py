@@ -9,10 +9,17 @@ from holix_media.providers import generate_image, generate_video
 
 
 class FakeHttp:
-    def __init__(self, posts: list[dict[str, Any]], gets: dict[str, bytes] | None = None) -> None:
+    def __init__(
+        self,
+        posts: list[dict[str, Any]],
+        gets: dict[str, bytes] | None = None,
+        gets_json: list[dict[str, Any]] | None = None,
+    ) -> None:
         self.posts = list(posts)
         self.gets = dict(gets or {})
+        self.gets_json = list(gets_json or [])
         self.post_calls: list[str] = []
+        self.get_calls: list[str] = []
         self.last_json: dict[str, Any] | None = None
 
     async def post_json(self, url: str, *, headers, json, timeout=120.0):
@@ -23,6 +30,9 @@ class FakeHttp:
         return self.posts.pop(0)
 
     async def get_json(self, url: str, *, headers, timeout=60.0):
+        self.get_calls.append(url)
+        if self.gets_json:
+            return self.gets_json.pop(0)
         return {"status": "completed", "url": "https://cdn.example/v.mp4"}
 
     async def get_bytes(self, url: str, *, headers=None, timeout=120.0):
@@ -179,3 +189,55 @@ async def test_openai_videos_sends_input_reference(tmp_path, monkeypatch) -> Non
     assert blob.data == b"mp4-bytes"
     assert http.last_json["input_reference"].startswith("data:image/png;base64,")
     assert http.last_json["image"].startswith("data:image/png;base64,")
+
+
+@pytest.mark.asyncio
+async def test_openai_videos_polls_until_url(monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    http = FakeHttp(
+        [{"id": "gen-vid-1", "status": "pending", "polling_url": "https://openrouter.ai/api/v1/videos/gen-vid-1"}],
+        gets_json=[
+            {"id": "gen-vid-1", "status": "processing"},
+            {"id": "gen-vid-1", "status": "completed", "url": "https://cdn.example/v.mp4"},
+        ],
+    )
+    spec = MediaProvider(
+        id="openai",
+        kind="video",
+        type="openai_videos",
+        base_url="https://api.openai.com/v1",
+        api_key_env="OPENAI_API_KEY",
+        model="bytedance/seedance-2.0-mini",
+    )
+
+    import holix_media.providers as prov
+
+    orig_sleep = prov.asyncio.sleep
+
+    async def no_sleep(_):
+        return None
+
+    monkeypatch.setattr(prov.asyncio, "sleep", no_sleep)
+    blob = await generate_video(spec, "walk", http=http)
+    assert blob.data == b"mp4-bytes"
+    assert "videos/gen-vid-1" in http.get_calls[-1]
+    assert "model=bytedance" in http.get_calls[-1].replace("%2F", "/") or "model=" in http.get_calls[-1]
+    monkeypatch.setattr(prov.asyncio, "sleep", orig_sleep)
+
+
+@pytest.mark.asyncio
+async def test_openai_videos_failed_job(monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    http = FakeHttp(
+        [{"id": "gen-vid-2", "status": "failed", "error": "copyright audio"}],
+    )
+    spec = MediaProvider(
+        id="openai",
+        kind="video",
+        type="openai_videos",
+        base_url="https://api.openai.com/v1",
+        api_key_env="OPENAI_API_KEY",
+        model="sora-2",
+    )
+    with pytest.raises(Exception, match="copyright"):
+        await generate_video(spec, "song", http=http)
