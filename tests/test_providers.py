@@ -192,6 +192,24 @@ async def test_openai_videos_sends_input_reference(tmp_path, monkeypatch) -> Non
 
 
 @pytest.mark.asyncio
+async def test_openai_videos_seconds_is_string(monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    http = FakeHttp([{"id": "gen-vid-0", "status": "completed", "url": "https://cdn.example/v.mp4"}])
+    spec = MediaProvider(
+        id="openai",
+        kind="video",
+        type="openai_videos",
+        base_url="https://api.openai.com/v1",
+        api_key_env="OPENAI_API_KEY",
+        model="minimax-hailuo-02",
+    )
+    blob = await generate_video(spec, "walk", http=http, duration_s=6)
+    assert blob.data == b"mp4-bytes"
+    assert http.last_json["seconds"] == "6"
+    assert isinstance(http.last_json["seconds"], str)
+
+
+@pytest.mark.asyncio
 async def test_openai_videos_polls_until_url(monkeypatch) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     http = FakeHttp(

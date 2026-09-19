@@ -155,7 +155,8 @@ async def _openai_videos(
         "prompt": prompt,
     }
     if duration_s:
-        body["seconds"] = int(duration_s)
+        # OpenAI Videos and OpenComfy expect a string ("6"), not a JSON number.
+        body["seconds"] = str(int(duration_s))
     refs = list(references or [])
     if refs:
         _attach_video_refs(body, prompt, refs)

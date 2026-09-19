@@ -48,7 +48,7 @@ _SKILL_SRC = Path(__file__).resolve().parent / "skill" / "media-gen"
 
 class MediaAgentExtension(AgentExtensionBase):
     name = "media"
-    version = "0.1.4"
+    version = "0.1.5"
     requires_holix = ">=1.1.0"
     permissions = frozenset({"tools", "network", "filesystem"})
 
