@@ -131,10 +131,10 @@ class GenerateVideoTool(BaseTool):
         self._agent = agent
         self.name = "generate_video"
         self.description = (
-            "Generate a short video from a text prompt, optionally animating "
-            "user photos. Pass attachment paths in `references` to bring a still "
-            "to life or follow the prompt using those images. Saves mp4 in media/. "
-            "Telegram/MAX: auto_send or send_chat_files."
+            "Ask the configured video model for a short clip (optionally from "
+            "user photos via `references`). Return that model output only. "
+            "Do not stitch images, install ffmpeg, or encode video in the shell. "
+            "Saves mp4 in media/. Telegram/MAX: auto_send or send_chat_files."
         )
         self.risk_level = "medium"
         self.parameters = {

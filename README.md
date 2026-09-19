@@ -10,7 +10,7 @@ MIT-расширение [Holix](https://github.com/javded-itres/Holix): аге�
 |-------------|-----|
 | Картинка | tool `generate_image` / слэш `/imagine` |
 | Референс | пользователь сначала шлёт фото, потом промпт; пути в `references` |
-| Видео | tool `generate_video` / слэш `/video` |
+| Видео | только `generate_video` (файл модели). Не собирать ролик через ffmpeg |
 | Провайдеры | LiteLLM proxy, OpenAI Images/Videos, xAI (`openai_images`), любой HTTP JSON |
 | TUI | кликабельная ссылка `file://…` на сохранённый файл |
 | Мессенджеры | файл пишется в `workspace/media/`, затем `send_chat_files` (альбом Telegram / вложение MAX) |

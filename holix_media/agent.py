@@ -48,7 +48,7 @@ _SKILL_SRC = Path(__file__).resolve().parent / "skill" / "media-gen"
 
 class MediaAgentExtension(AgentExtensionBase):
     name = "media"
-    version = "0.1.3"
+    version = "0.1.4"
     requires_holix = ">=1.1.0"
     permissions = frozenset({"tools", "network", "filesystem"})
 
@@ -137,7 +137,10 @@ class MediaAgentExtension(AgentExtensionBase):
             "(`[Open image](file://…)`). In Telegram or MAX the file is sent when "
             "auto_send is on; otherwise call `send_chat_files`. "
             "Do not paste base64. Do not claim the user received the file unless "
-            "send_chat_files returned Sent N file(s)."
+            "send_chat_files returned Sent N file(s).\n"
+            "Hard rule: never assemble video yourself (no ffmpeg, moviepy, "
+            "frame-stitching, or encoding scripts). Return only the file "
+            "`generate_video` saved. If that tool fails, report the error."
         )
 
     def _install_skill(self, agent: Any) -> None:

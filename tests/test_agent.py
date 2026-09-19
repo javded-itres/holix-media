@@ -26,3 +26,15 @@ def test_slash_and_prompt() -> None:
     prompt = ext.augment_system_prompt("default")
     assert prompt and "generate_image" in prompt
     assert "send_chat_files" in prompt
+    assert "ffmpeg" in prompt
+    assert "generate_video" in prompt
+    skill = (
+        __import__("pathlib").Path(__file__).resolve().parents[1]
+        / "holix_media"
+        / "skill"
+        / "media-gen"
+        / "SKILL.md"
+    )
+    text = skill.read_text(encoding="utf-8")
+    assert "do not assemble video yourself" in text.lower() or "не собирать" in text.lower()
+    assert "ffmpeg" in text.lower()

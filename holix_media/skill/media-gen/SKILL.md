@@ -13,4 +13,15 @@ When the user asks to **нарисуй**, **сгенерируй картинк�
 4. In Telegram/MAX, the file is sent when auto_send is on. If the tool result does not contain `Sent N file(s)`, call `send_chat_files` with the saved path.
 5. Never paste base64. Never claim the user received the file unless send_chat_files / generate_* reported a send.
 
+## Hard rule: do not assemble video yourself
+
+Video comes **only** from `generate_video` (the configured model). If the tool fails or times out, say so. Do **not**:
+
+- install or call `ffmpeg` / `moviepy` / `opencv` to stitch frames
+- turn a sequence of `generate_image` stills into an mp4
+- write a Python/shell script that encodes video
+- fake a clip from screenshots
+
+Stills are `generate_image`. Motion is `generate_video` with the same prompt and `references` if the user sent photos.
+
 Optional `provider` argument selects a configured backend (see extension settings `image_providers` / `video_providers`).
