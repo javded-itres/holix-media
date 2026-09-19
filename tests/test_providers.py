@@ -13,9 +13,11 @@ class FakeHttp:
         self.posts = list(posts)
         self.gets = dict(gets or {})
         self.post_calls: list[str] = []
+        self.last_json: dict[str, Any] | None = None
 
     async def post_json(self, url: str, *, headers, json, timeout=120.0):
         self.post_calls.append(url)
+        self.last_json = json
         if not self.posts:
             raise RuntimeError("unexpected POST " + url)
         return self.posts.pop(0)
@@ -126,3 +128,54 @@ async def test_openai_videos_direct_url(monkeypatch) -> None:
     blob = await generate_video(spec, "waves", http=http)
     assert blob.data == b"mp4-bytes"
     assert "video" in blob.mime
+
+
+@pytest.mark.asyncio
+async def test_openai_images_sends_reference_messages(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    src = tmp_path / "ref.jpg"
+    src.write_bytes(b"\xff\xd8fakejpg")
+    png = __import__("base64").b64encode(b"OUT").decode()
+    http = FakeHttp([{"data": [{"b64_json": png}]}])
+    spec = MediaProvider(
+        id="openai",
+        kind="image",
+        type="openai_images",
+        base_url="https://api.openai.com/v1",
+        api_key_env="OPENAI_API_KEY",
+        model="google/gemini-2.5-flash-image",
+    )
+    from holix_media.refs import load_references
+
+    refs = load_references([str(src)], agent=None)
+    blob = await generate_image(spec, "make it night", http=http, references=refs)
+    assert blob.data == b"OUT"
+    body = http.last_json
+    assert body["prompt"] == "make it night"
+    assert body["image"].startswith("data:image/jpeg;base64,")
+    content = body["messages"][0]["content"]
+    assert content[0]["type"] == "text"
+    assert content[1]["type"] == "image_url"
+
+
+@pytest.mark.asyncio
+async def test_openai_videos_sends_input_reference(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    src = tmp_path / "still.png"
+    src.write_bytes(b"PNGREF")
+    http = FakeHttp([{"url": "https://cdn.example/v.mp4"}])
+    spec = MediaProvider(
+        id="openai",
+        kind="video",
+        type="openai_videos",
+        base_url="https://api.openai.com/v1",
+        api_key_env="OPENAI_API_KEY",
+        model="sora-2",
+    )
+    from holix_media.refs import load_references
+
+    refs = load_references([str(src)], agent=None)
+    blob = await generate_video(spec, "the cat starts walking", http=http, references=refs)
+    assert blob.data == b"mp4-bytes"
+    assert http.last_json["input_reference"].startswith("data:image/png;base64,")
+    assert http.last_json["image"].startswith("data:image/png;base64,")

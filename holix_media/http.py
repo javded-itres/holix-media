@@ -45,7 +45,9 @@ class HttpxTransport:
 
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
             resp = await client.post(url, headers=headers, json=json)
-            resp.raise_for_status()
+            if resp.is_error:
+                detail = (resp.text or "")[:500]
+                raise RuntimeError(f"HTTP {resp.status_code} {url}: {detail}")
             data = resp.json()
             return data if isinstance(data, dict) else {"data": data}
 

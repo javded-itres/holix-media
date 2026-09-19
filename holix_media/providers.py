@@ -11,6 +11,7 @@ from urllib.parse import urljoin
 
 from holix_media.config import MediaProvider, json_path
 from holix_media.http import HttpTransport, HttpxTransport
+from holix_media.refs import ReferenceImage, user_content
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,13 +59,15 @@ async def generate_image(
     *,
     http: HttpTransport | None = None,
     size: str | None = None,
+    references: list[ReferenceImage] | None = None,
 ) -> MediaBlob:
     transport = http or HttpxTransport()
     kind = provider.type.strip().lower()
+    refs = list(references or [])
     if kind in {"openai_images", "openai", "dalle", "litellm", "litellm_images"}:
-        return await _openai_images(provider, prompt, transport, size=size)
+        return await _openai_images(provider, prompt, transport, size=size, references=refs)
     if kind in {"http_json", "http"}:
-        return await _http_json(provider, prompt, transport, kind="image")
+        return await _http_json(provider, prompt, transport, kind="image", references=refs)
     raise MediaProviderError(f"Unknown image provider type: {provider.type}")
 
 
@@ -74,13 +77,17 @@ async def generate_video(
     *,
     http: HttpTransport | None = None,
     duration_s: int | None = None,
+    references: list[ReferenceImage] | None = None,
 ) -> MediaBlob:
     transport = http or HttpxTransport()
     kind = provider.type.strip().lower()
+    refs = list(references or [])
     if kind in {"openai_videos", "openai", "sora", "litellm", "litellm_videos"}:
-        return await _openai_videos(provider, prompt, transport, duration_s=duration_s)
+        return await _openai_videos(
+            provider, prompt, transport, duration_s=duration_s, references=refs
+        )
     if kind in {"http_json", "http"}:
-        return await _http_json(provider, prompt, transport, kind="video")
+        return await _http_json(provider, prompt, transport, kind="video", references=refs)
     raise MediaProviderError(f"Unknown video provider type: {provider.type}")
 
 
@@ -90,6 +97,7 @@ async def _openai_images(
     http: HttpTransport,
     *,
     size: str | None,
+    references: list[ReferenceImage] | None = None,
 ) -> MediaBlob:
     if not provider.api_key:
         raise MediaProviderError(f"API key missing ({provider.api_key_env or 'api_key'})")
@@ -97,12 +105,16 @@ async def _openai_images(
     if not base:
         raise MediaProviderError("base_url is empty (set LITELLM_API_BASE or image provider base_url)")
     url = _join(base, "/images/generations")
+    chosen_size = size or provider.size or "1024x1024"
     body: dict[str, Any] = {
         "model": provider.model or "dall-e-3",
         "prompt": prompt,
         "n": 1,
-        "size": size or provider.size or "1024x1024",
+        "size": chosen_size,
     }
+    refs = list(references or [])
+    if refs:
+        _attach_image_refs(body, prompt, refs, size=chosen_size)
     # DALL·E accepts b64; LiteLLM / gpt-image / Grok often reject response_format.
     ptype = provider.type.strip().lower()
     if ptype not in {"litellm", "litellm_images"} and "dall-e" in (provider.model or "").lower():
@@ -130,6 +142,7 @@ async def _openai_videos(
     http: HttpTransport,
     *,
     duration_s: int | None,
+    references: list[ReferenceImage] | None = None,
 ) -> MediaBlob:
     if not provider.api_key:
         raise MediaProviderError(f"API key missing ({provider.api_key_env or 'api_key'})")
@@ -143,6 +156,9 @@ async def _openai_videos(
     }
     if duration_s:
         body["seconds"] = int(duration_s)
+    refs = list(references or [])
+    if refs:
+        _attach_video_refs(body, prompt, refs)
     data = await http.post_json(url, headers=_auth_headers(provider), json=body, timeout=180.0)
     blob = await _blob_from_payload(data, http, headers=_auth_headers(provider), kind="video")
     if blob is not None:
@@ -172,14 +188,18 @@ async def _http_json(
     http: HttpTransport,
     *,
     kind: str,
+    references: list[ReferenceImage] | None = None,
 ) -> MediaBlob:
     if provider.api_key_env and not provider.api_key:
         raise MediaProviderError(f"API key missing ({provider.api_key_env})")
+    refs = list(references or [])
     mapping = {
         "prompt": prompt,
         "model": provider.model,
         "size": provider.size,
         "kind": kind,
+        "image_b64": refs[0].b64 if refs else "",
+        "image_data_url": refs[0].data_url if refs else "",
     }
     path = str(provider.extra.get("path") or "/")
     url = _join(provider.resolved_base_url or provider.base_url, path)
@@ -243,6 +263,34 @@ async def _blob_from_payload(
             source_url=str(remote),
         )
     return None
+
+
+def _attach_image_refs(
+    body: dict[str, Any],
+    prompt: str,
+    refs: list[ReferenceImage],
+    *,
+    size: str,
+) -> None:
+    """MikroLLM/OpenRouter: messages + image_url. OpenAI-style: image / images."""
+    body["messages"] = [
+        {"role": "user", "content": user_content(prompt, refs, size=size)},
+    ]
+    body["image"] = refs[0].data_url
+    if len(refs) > 1:
+        body["images"] = [r.data_url for r in refs]
+
+
+def _attach_video_refs(body: dict[str, Any], prompt: str, refs: list[ReferenceImage]) -> None:
+    """Sora input_reference, OpenRouter image / images, plus chat messages."""
+    urls = [r.data_url for r in refs]
+    body["input_reference"] = urls[0]
+    body["image"] = urls[0]
+    if len(urls) > 1:
+        body["images"] = urls
+    body["messages"] = [
+        {"role": "user", "content": user_content(prompt, refs)},
+    ]
 
 
 def _filename(ext: str) -> str:

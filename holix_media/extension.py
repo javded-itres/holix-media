@@ -7,12 +7,13 @@ from typing import Any
 
 from holix_media.config import load_media_config
 from holix_media.providers import generate_image, generate_video
+from holix_media.refs import load_references
 from holix_media.store import save_blob
 
 
 class MediaHostExtension:
     name = "media"
-    version = "0.1.1"
+    version = "0.1.2"
     requires_holix = ">=1.1.0"
     description = "Generate images and video; send to Telegram/MAX chats"
     capabilities = frozenset({"cli"})
@@ -51,12 +52,18 @@ class MediaHostExtension:
         def imagine(
             prompt: str = typer.Argument(..., help="Image prompt"),
             provider: str = typer.Option("", "--provider", "-p"),
+            ref: list[str] | None = typer.Option(
+                None,
+                "--ref",
+                help="Reference image path (repeatable)",
+            ),
         ) -> None:
             cfg = _cfg()
             spec = cfg.provider("image", provider or None)
             if spec is None:
                 raise typer.BadParameter("No image provider configured")
-            blob = asyncio.run(generate_image(spec, prompt))
+            refs = load_references(ref)
+            blob = asyncio.run(generate_image(spec, prompt, references=refs))
             path = save_blob(blob, agent=None, subdir=cfg.output_subdir)
             typer.echo(str(path))
 
@@ -64,12 +71,18 @@ class MediaHostExtension:
         def video_cmd(
             prompt: str = typer.Argument(..., help="Video prompt"),
             provider: str = typer.Option("", "--provider", "-p"),
+            ref: list[str] | None = typer.Option(
+                None,
+                "--ref",
+                help="Still photo to animate (repeatable)",
+            ),
         ) -> None:
             cfg = _cfg()
             spec = cfg.provider("video", provider or None)
             if spec is None:
                 raise typer.BadParameter("No video provider configured")
-            blob = asyncio.run(generate_video(spec, prompt))
+            refs = load_references(ref)
+            blob = asyncio.run(generate_video(spec, prompt, references=refs))
             path = save_blob(blob, agent=None, subdir=cfg.output_subdir)
             typer.echo(str(path))
 

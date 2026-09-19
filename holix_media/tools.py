@@ -8,6 +8,7 @@ from pathlib import Path
 
 from holix_media.config import MediaConfig, load_media_config
 from holix_media.providers import generate_image, generate_video
+from holix_media.refs import ReferenceError, load_references
 from holix_media.store import save_blob
 
 try:
@@ -50,11 +51,11 @@ class GenerateImageTool(BaseTool):
         self._agent = agent
         self.name = "generate_image"
         self.description = (
-            "Generate an image from a text prompt using a configured media provider "
-            "(OpenAI DALL·E / gpt-image, xAI Grok image, or custom HTTP). "
-            "Saves the file into the workspace media/ folder. In Telegram/MAX, "
-            "the file is sent to the chat automatically when auto_send is on; "
-            "otherwise call send_chat_files with the returned path."
+            "Generate or edit an image. Pass a text prompt. If the user uploaded "
+            "photos (Telegram/MAX attachments already saved on disk, or files in "
+            "workspace), pass their paths in `references` so the model uses them "
+            "as source: restyle, combine several photos, or follow the prompt. "
+            "Saves into workspace media/. Telegram/MAX: auto_send or send_chat_files."
         )
         self.risk_level = "medium"
         self.parameters = {
@@ -76,6 +77,14 @@ class GenerateImageTool(BaseTool):
                     "type": "boolean",
                     "description": "Send to Telegram/MAX if available (default: auto_send setting)",
                 },
+                "references": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Paths to reference photos (user uploads). "
+                        "Use when the user first sent images, then said what to do."
+                    ),
+                },
             },
             "required": ["prompt"],
         }
@@ -86,6 +95,7 @@ class GenerateImageTool(BaseTool):
         provider: str = "",
         size: str = "",
         send: bool | None = None,
+        references: list[str] | None = None,
         **_: Any,
     ) -> str:
         text = (prompt or "").strip()
@@ -100,7 +110,14 @@ class GenerateImageTool(BaseTool):
                 "Error: no image provider configured. "
                 "Add image_providers in extension settings or HOLIX_MEDIA_IMAGE_* env."
             )
-        blob = await generate_image(spec, text, size=size or None)
+        try:
+            refs = load_references(references, agent=self._agent)
+        except ReferenceError as exc:
+            return f"Error: {exc}"
+        try:
+            blob = await generate_image(spec, text, size=size or None, references=refs)
+        except Exception as exc:
+            return f"Error: {exc}"
         path = save_blob(blob, agent=self._agent, subdir=cfg.output_subdir)
         auto = cfg.auto_send if send is None else bool(send)
         extra = await _maybe_send(str(path), text[:200], auto_send=auto)
@@ -114,10 +131,10 @@ class GenerateVideoTool(BaseTool):
         self._agent = agent
         self.name = "generate_video"
         self.description = (
-            "Generate a short video from a text prompt using a configured video "
-            "provider (OpenAI Sora-style /videos, or custom HTTP JSON). "
-            "Saves an mp4 into workspace media/. In Telegram/MAX the file is sent "
-            "when auto_send is on; otherwise use send_chat_files."
+            "Generate a short video from a text prompt, optionally animating "
+            "user photos. Pass attachment paths in `references` to bring a still "
+            "to life or follow the prompt using those images. Saves mp4 in media/. "
+            "Telegram/MAX: auto_send or send_chat_files."
         )
         self.risk_level = "medium"
         self.parameters = {
@@ -139,6 +156,14 @@ class GenerateVideoTool(BaseTool):
                     "type": "boolean",
                     "description": "Send to Telegram/MAX if available",
                 },
+                "references": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Paths to still photos to animate / use as the first frame "
+                        "(user uploads already on disk)."
+                    ),
+                },
             },
             "required": ["prompt"],
         }
@@ -149,6 +174,7 @@ class GenerateVideoTool(BaseTool):
         provider: str = "",
         duration_s: int | None = None,
         send: bool | None = None,
+        references: list[str] | None = None,
         **_: Any,
     ) -> str:
         text = (prompt or "").strip()
@@ -163,7 +189,14 @@ class GenerateVideoTool(BaseTool):
                 "Error: no video provider configured. "
                 "Add video_providers in extension settings or HOLIX_MEDIA_VIDEO_* env."
             )
-        blob = await generate_video(spec, text, duration_s=duration_s)
+        try:
+            refs = load_references(references, agent=self._agent)
+        except ReferenceError as exc:
+            return f"Error: {exc}"
+        try:
+            blob = await generate_video(spec, text, duration_s=duration_s, references=refs)
+        except Exception as exc:
+            return f"Error: {exc}"
         path = save_blob(blob, agent=self._agent, subdir=cfg.output_subdir)
         auto = cfg.auto_send if send is None else bool(send)
         extra = await _maybe_send(str(path), text[:200], auto_send=auto)

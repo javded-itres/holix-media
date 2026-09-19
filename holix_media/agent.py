@@ -48,7 +48,7 @@ _SKILL_SRC = Path(__file__).resolve().parent / "skill" / "media-gen"
 
 class MediaAgentExtension(AgentExtensionBase):
     name = "media"
-    version = "0.1.1"
+    version = "0.1.2"
     requires_holix = ">=1.1.0"
     permissions = frozenset({"tools", "network", "filesystem"})
 
@@ -130,6 +130,9 @@ class MediaAgentExtension(AgentExtensionBase):
             "## Media generation\n"
             "Tools `generate_image` and `generate_video` create files in workspace `media/`.\n"
             f"Image providers: {imgs}. Video providers: {vids}.\n"
+            "Workflow: the user may **first send photos**, then say what to do "
+            "(edit, combine, restyle, «оживи», make a video). Pass those disk paths "
+            "in `references` (from «Вложения» / previous turns). Do not ask to re-upload.\n"
             "In TUI, put the markdown Open link from the tool result in the reply "
             "(`[Open image](file://…)`). In Telegram or MAX the file is sent when "
             "auto_send is on; otherwise call `send_chat_files`. "

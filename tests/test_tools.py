@@ -54,3 +54,65 @@ async def test_generate_image_requires_provider() -> None:
     tool = GenerateImageTool(config=cfg, agent=None)
     out = await tool.execute(prompt="x")
     assert out.startswith("Error:")
+
+
+@pytest.mark.asyncio
+async def test_generate_image_passes_references(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    src = tmp_path / "in.png"
+    src.write_bytes(b"REF")
+    cfg = MediaConfig(
+        enabled=True,
+        auto_send=False,
+        output_subdir="media",
+        image_providers=(
+            MediaProvider(
+                id="openai",
+                kind="image",
+                type="openai_images",
+                base_url="https://api.openai.com/v1",
+                api_key_env="OPENAI_API_KEY",
+                model="dall-e-3",
+            ),
+        ),
+        video_providers=(),
+    )
+    agent = type("A", (), {})()
+    agent.config = type("C", (), {"workspace_root": str(tmp_path)})()
+    tool = GenerateImageTool(config=cfg, agent=agent)
+    seen: dict = {}
+
+    async def fake_gen(provider, prompt, **kwargs):
+        seen["refs"] = kwargs.get("references")
+        return MediaBlob(b"PNG", "image/png", "pic.png")
+
+    monkeypatch.setattr("holix_media.tools.generate_image", fake_gen)
+    result = await tool.execute(prompt="оживи", references=[str(src)])
+    assert "Saved image:" in result
+    assert seen["refs"]
+    assert seen["refs"][0].path == src.resolve()
+
+
+@pytest.mark.asyncio
+async def test_generate_image_missing_reference(tmp_path: Path) -> None:
+    cfg = MediaConfig(
+        True,
+        False,
+        "media",
+        (
+            MediaProvider(
+                id="openai",
+                kind="image",
+                type="openai_images",
+                base_url="https://api.openai.com/v1",
+                api_key_env="OPENAI_API_KEY",
+                model="x",
+            ),
+        ),
+        (),
+    )
+    tool = GenerateImageTool(config=cfg, agent=None)
+    out = await tool.execute(prompt="x", references=[str(tmp_path / "nope.png")])
+    assert out.startswith("Error:")

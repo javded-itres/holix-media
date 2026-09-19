@@ -9,6 +9,7 @@ MIT-расширение [Holix](https://github.com/javded-itres/Holix): аге�
 | Возможность | Как |
 |-------------|-----|
 | Картинка | tool `generate_image` / слэш `/imagine` |
+| Референс | пользователь сначала шлёт фото, потом промпт; пути в `references` |
 | Видео | tool `generate_video` / слэш `/video` |
 | Провайдеры | LiteLLM proxy, OpenAI Images/Videos, xAI (`openai_images`), любой HTTP JSON |
 | TUI | кликабельная ссылка `file://…` на сохранённый файл |
@@ -103,6 +104,16 @@ video_providers:
 
 Первый элемент списка — провайдер по умолчанию. В tool можно передать `provider: grok`.
 
+### Референс-фото
+
+Пользователь может **сначала загрузить фото** (одно или несколько), потом написать, что сделать: перерисовать, склеить, «оживить», сделать видео.
+
+Агент вызывает `generate_image` / `generate_video` с `references: ["/path/to/photo.jpg", …]` — пути из блока «Вложения» в Telegram/MAX (файлы уже на диске).
+
+CLI: `holix media imagine "ночь" --ref a.jpg --ref b.png` · `holix media video "оживи" --ref still.jpg`
+
+Через MikroLLM / OpenRouter картинки уходят как `messages` + `image_url` (data URI); видео — `input_reference` / `image`.
+
 Переменные окружения (перекрывают YAML):
 
 | Env | Смысл |
@@ -194,6 +205,8 @@ holix -p production extensions agent-list
 ```bash
 holix media providers
 holix media imagine "кот в космосе" --provider grok
+holix media imagine "сделай ночь" --ref photo.jpg --ref photo2.png
+holix media video "оживи это фото" --ref still.png
 holix media video "волны на закате"
 ```
 
